@@ -19,20 +19,11 @@ local HumanoidRootPart
 local isTweening = false  -- Controla para não iniciar múltiplos tweens
 local PartTele = nil      -- Parte usada para o tween
 
--- Remotes (ajuste conforme necessário)
-local Remotes = {
-    CommF = nil,  -- Será definido quando disponível
-    CommF_ = nil  -- Será definido quando disponível
-}
+-- Remotes
+local Remotes = {}
 
 -- Aguarda os remotes estarem disponíveis
 spawn(function()
-    while not Remotes.CommF do
-        pcall(function()
-            Remotes.CommF = game:GetService("ReplicatedStorage").Remotes.CommF
-        end)
-        task.wait(1)
-    end
     while not Remotes.CommF_ do
         pcall(function()
             Remotes.CommF_ = game:GetService("ReplicatedStorage").Remotes.CommF_
@@ -73,31 +64,6 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     isTweening = false
 end)
 
--- Função para verificar teleporters próximos
-function CheckNearestTeleporter(targetPos)
-    local nearest = nil
-    local shortestDistance = math.huge
-    
-    for _, v in pairs(workspace:GetDescendants()) do
-        if v.Name == "Teleporter" and v:IsA("BasePart") then
-            local distance = (v.Position - targetPos.Position).Magnitude
-            if distance < shortestDistance then
-                shortestDistance = distance
-                nearest = v
-            end
-        end
-    end
-    
-    return nearest
-end
-
--- Função para solicitar entrada em teleporter
-function requestEntrance(teleporter)
-    pcall(function()
-        firetouchinterest(LocalPlayer.Character.HumanoidRootPart, teleporter, 0)
-    end)
-end
-
 -- Tween System
 function TweenPlayer(targetCFrame)
     -- Verificações de segurança
@@ -107,12 +73,6 @@ function TweenPlayer(targetCFrame)
     
     local targetPos = targetCFrame.Position
     local distance = (targetPos - HumanoidRootPart.Position).Magnitude
-    
-    -- Verifica teleporter mais próximo
-    local nearestTeleport = CheckNearestTeleporter(targetCFrame)
-    if nearestTeleport then
-        requestEntrance(nearestTeleport)
-    end
     
     -- Cria parte de teletransporte se não existir
     if not Character:FindFirstChild("PartTele") then
@@ -166,7 +126,7 @@ function InitEspDevilFruit()
                 if v:FindFirstChild("Handle") then
                     local handle = v.Handle
                     
-                    if _G.EspDevilfruit then
+                    if _G.EspDevilFruit then
                         if not handle:FindFirstChild("EspDevilFruit") then
                             -- Cria BillboardGui
                             local bill = Instance.new("BillboardGui")
@@ -179,6 +139,7 @@ function InitEspDevilFruit()
                             
                             -- Label com nome e distância
                             local name = Instance.new("TextLabel")
+                            name.Name = "Label"
                             name.Font = Enum.Font.GothamSemibold
                             name.TextSize = 14
                             name.TextWrapped = true
@@ -219,7 +180,7 @@ function InitEspDevilFruit()
                             end)()
                         else
                             -- Atualiza apenas o texto
-                            handle["EspDevilFruit"].TextLabel.Text = v.Name .. " \n" .. round((Character.Head.Position - handle.Position).Magnitude / 3) .. " Distance"
+                            handle["EspDevilFruit"].Label.Text = v.Name .. " \n" .. round((Character.Head.Position - handle.Position).Magnitude / 3) .. " Distance"
                         end
                     else
                         -- Remove ESP se desativado
@@ -236,7 +197,7 @@ end
 -- Loop de atualização do ESP
 spawn(function()
     while task.wait(1) do
-        if _G.EspDevilfruit then
+        if _G.EspDevilFruit then
             InitEspDevilFruit()
         end
     end
@@ -291,20 +252,24 @@ function TweenToFruit()
 end
 
 -- Auto Store Fruit
+local lastStoredFruit = nil  -- Proteção contra chamadas repetidas
+
 function AutoStoreFruit()
     if not _G.AutoStoreFruit then return end
     
     pcall(function()
         for i, v in pairs(LocalPlayer.Backpack:GetChildren()) do
             if string.find(v.Name, "Fruit") and v:IsA("Tool") then
-                -- Extrai o nome da fruta
-                local fruitName = string.gsub(v.Name, " Fruit", "")
-                
-                -- Tenta armazenar usando o Remote
-                if Remotes.CommF then
-                    Remotes.CommF:InvokeServer("StoreFruit", fruitName .. "-" .. fruitName, v)
-                elseif Remotes.CommF_ then
-                    Remotes.CommF_:InvokeServer("StoreFruit", fruitName .. "-" .. fruitName, v)
+                -- Proteção para evitar chamadas repetidas da mesma fruta
+                if v.Name ~= lastStoredFruit then
+                    -- Extrai o nome da fruta
+                    local fruitName = string.gsub(v.Name, " Fruit", "")
+                    
+                    -- Tenta armazenar usando o Remote
+                    if Remotes.CommF_ then
+                        Remotes.CommF_:InvokeServer("StoreFruit", fruitName .. "-" .. fruitName, v)
+                        lastStoredFruit = v.Name
+                    end
                 end
             end
         end
@@ -352,7 +317,7 @@ function HopToLowestPlayers()
         else
             break
         end
-    until server and server.playing < 5  -- Prefere servidores com menos de 5 jogadores
+    until server
     
     -- Teleporta para o servidor encontrado
     if server then
@@ -522,7 +487,7 @@ local function CreateUI()
     
     -- Toggles e Botões da seção Fruit
     CreateToggle(FruitSection, "ESP Devil Fruit", false, function(state)
-        _G.EspDevilfruit = state
+        _G.EspDevilFruit = state
         if state then
             InitEspDevilFruit()
         end
@@ -545,14 +510,24 @@ local function CreateUI()
         HopToLowestPlayers()
     end)
     
-    -- Funcionalidade de arrastar
+    -- Funcionalidade de arrastar (suporte Mouse e Touch)
     local dragging = false
     local dragInput = nil
     local dragStart = nil
     local startPos = nil
     
+    local function updateDrag(input)
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+    
     Header.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = MainFrame.Position
@@ -560,39 +535,13 @@ local function CreateUI()
     end)
     
     Header.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = input.Position - dragStart
-            MainFrame.Position = UDim2.new(
-                startPos.X.Scale,
-                startPos.X.Offset + delta.X,
-                startPos.Y.Scale,
-                startPos.Y.Offset + delta.Y
-            )
-        end
-    end)
-    
-    Header.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = MainFrame.Position
-        end
-    end)
-    
-    Header.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = input.Position - dragStart
-            MainFrame.Position = UDim2.new(
-                startPos.X.Scale,
-                startPos.X.Offset + delta.X,
-                startPos.Y.Scale,
-                startPos.Y.Offset + delta.Y
-            )
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateDrag(input)
         end
     end)
     
     Header.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
@@ -619,7 +568,7 @@ end
 CreateUI()
 
 -- Inicializa variáveis globais
-_G.EspDevilfruit = false
+_G.EspDevilFruit = false
 _G.AutoStoreFruit = false
 _G.GlobalDelay = Settings.GlobalDelay
 _G.PlayerTweenSpeed = Settings.PlayerTweenSpeed
